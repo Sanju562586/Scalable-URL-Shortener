@@ -4,7 +4,7 @@ The short_code is derived from the auto-increment id via Base-62 encoding
 (see app/core/encoder.py), ensuring uniqueness without collision checks.
 """
 
-from datetime import datetime
+from datetime import datetime, timezone
 
 from sqlalchemy import (
     BigInteger, Boolean, DateTime, ForeignKey,
@@ -34,7 +34,9 @@ class URL(Base):
         DateTime(timezone=True), server_default=func.now()
     )
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=lambda: datetime.now(timezone.utc),  # Python-side; fires on every ORM UPDATE
     )
 
     # Relationships

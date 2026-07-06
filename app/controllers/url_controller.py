@@ -76,9 +76,7 @@ def redirect(
     Resolve a short code to its original URL and redirect (302).
     Records a click event with client metadata.
 
-    Raises HTTP 404 immediately for reserved path segments so the route
-    doesn't accidentally swallow ``/docs`` or ``/api/*`` requests in
-    misconfigured deployments.
+    The URL object is reused from resolve() to avoid a duplicate DB query.
     """
     # Guard against reserved paths reaching this handler
     if short_code.split("/")[0].lower() in _RESERVED_PREFIXES:
@@ -87,20 +85,18 @@ def redirect(
     url_service = URLService(db, cache)
     analytics_service = AnalyticsService(db)
 
-    original_url = url_service.resolve(short_code)
+    # resolve() now returns (original_url, url_obj) — no second DB query needed.
+    original_url, url_obj = url_service.resolve(short_code)
 
-    # Look up the URL object to record click metadata
-    url_obj = url_service._repo.get_by_short_code(short_code)
-    if url_obj:
-        ip = request.client.host if request.client else None
-        ua = request.headers.get("user-agent")
-        referer = request.headers.get("referer")
-        analytics_service.record_click(
-            url_id=url_obj.id,
-            ip_address=ip,
-            user_agent=ua,
-            referer=referer,
-        )
+    ip = request.client.host if request.client else None
+    ua = request.headers.get("user-agent")
+    referer = request.headers.get("referer")
+    analytics_service.record_click(
+        url_id=url_obj.id,
+        ip_address=ip,
+        user_agent=ua,
+        referer=referer,
+    )
 
     return RedirectResponse(url=original_url, status_code=status.HTTP_302_FOUND)
 

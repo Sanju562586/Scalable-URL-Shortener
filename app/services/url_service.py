@@ -92,12 +92,17 @@ class URLService:
             if existing:
                 raise CustomCodeConflict(request.custom_code)
 
+        # Ensure expires_at is timezone-aware UTC to prevent comparison errors.
+        expires_at = request.expires_at
+        if expires_at is not None and expires_at.tzinfo is None:
+            expires_at = expires_at.replace(tzinfo=timezone.utc)
+
         url_obj = URL(
             short_code=request.custom_code or "__pending__",
             original_url=str(request.original_url),
             api_key_id=api_key.id,
             is_active=True,
-            expires_at=request.expires_at,
+            expires_at=expires_at,
         )
         created = self._repo.create(url_obj)
 
@@ -111,9 +116,9 @@ class URLService:
 
         return self._to_response(created)
 
-    def resolve(self, short_code: str) -> str:
+    def resolve(self, short_code: str) -> tuple[str, URL]:
         """
-        Resolve a short code to its original URL.
+        Resolve a short code to its original URL and the URL ORM object.
 
         Checks Redis first; falls back to DB on cache miss.
         Validates active status and expiry on every resolution.
@@ -122,7 +127,7 @@ class URLService:
             short_code: The Base-62 short code.
 
         Returns:
-            The original (long) URL string.
+            Tuple of (original_url: str, url_obj: URL).
 
         Raises:
             ShortCodeNotFound, ShortCodeInactive, ShortCodeExpired
@@ -130,8 +135,6 @@ class URLService:
         # ── Cache hit ──
         cached = self._cache_get(short_code)
         if cached:
-            # Still validate in DB for is_active / expiry on cache hit
-            # Use a lightweight existence check rather than skipping entirely.
             url_obj = self._repo.get_by_short_code_active(short_code)
             if url_obj is None:
                 self._cache_delete(short_code)
@@ -139,7 +142,7 @@ class URLService:
             self._validate_url(url_obj, short_code)
             # Refresh TTL on hot path
             self._cache_set(short_code, cached)
-            return cached
+            return cached, url_obj
 
         # ── Cache miss — query DB ──
         url_obj = self._repo.get_by_short_code(short_code)
@@ -148,7 +151,7 @@ class URLService:
 
         self._validate_url(url_obj, short_code)
         self._cache_set(short_code, url_obj.original_url)
-        return url_obj.original_url
+        return url_obj.original_url, url_obj
 
     def deactivate(self, short_code: str, api_key: APIKey) -> None:
         """
@@ -190,8 +193,13 @@ class URLService:
         """Raise appropriate exception if URL is unusable."""
         if not url_obj.is_active:
             raise ShortCodeInactive(short_code)
-        if url_obj.expires_at and url_obj.expires_at < datetime.now(tz=timezone.utc):
-            raise ShortCodeExpired(short_code)
+        if url_obj.expires_at is not None:
+            # Ensure both sides are timezone-aware for safe comparison.
+            expires_at = url_obj.expires_at
+            if expires_at.tzinfo is None:
+                expires_at = expires_at.replace(tzinfo=timezone.utc)
+            if expires_at < datetime.now(tz=timezone.utc):
+                raise ShortCodeExpired(short_code)
 
     def _to_response(self, url_obj: URL) -> URLResponse:
         short_url = f"{settings.base_url}/{url_obj.short_code}"

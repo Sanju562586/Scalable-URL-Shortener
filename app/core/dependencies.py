@@ -8,7 +8,8 @@ Centralises:
   • Rate limiting enforcement
 """
 
-from fastapi import Depends, Header
+from fastapi import Depends
+from fastapi.security import APIKeyHeader
 from sqlalchemy.orm import Session
 from redis import Redis
 
@@ -33,8 +34,10 @@ def redis_client(cache: Redis = Depends(get_redis)) -> Redis:
 
 # ── Authentication ────────────────────────────────────────────────────────────
 
+api_key_header = APIKeyHeader(name="X-API-Key", description="Your API key")
+
 def get_api_key(
-    x_api_key: str = Header(..., alias="X-API-Key", description="Your API key"),
+    x_api_key: str = Depends(api_key_header),
     db: Session = Depends(get_db),
 ) -> APIKey:
     """

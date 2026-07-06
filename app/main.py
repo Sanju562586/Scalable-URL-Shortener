@@ -8,10 +8,11 @@ Environment variables are loaded from .env (see .env.example).
 """
 
 import logging
+import traceback
 from contextlib import asynccontextmanager
 from typing import AsyncIterator
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
@@ -72,6 +73,23 @@ def create_app() -> FastAPI:
     app.include_router(url_api_router)
     app.include_router(analytics_router)
     app.include_router(redirect_router)
+
+    # ── Global exception handler ─────────────────────────────────────────────
+    @app.exception_handler(Exception)
+    async def unhandled_exception_handler(
+        request: Request, exc: Exception
+    ) -> JSONResponse:
+        """Catch-all for unhandled exceptions — logs traceback, returns safe JSON."""
+        logger.error(
+            "Unhandled exception on %s %s:\n%s",
+            request.method,
+            request.url.path,
+            traceback.format_exc(),
+        )
+        return JSONResponse(
+            status_code=500,
+            content={"detail": "Internal server error. Please try again later."},
+        )
 
     # ── Health check ──────────────────────────────────────────────────────────
     @app.get("/api/v1/health", tags=["Health"], summary="Health check")
