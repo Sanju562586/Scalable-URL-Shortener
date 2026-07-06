@@ -1,0 +1,77 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Scalable URL Shortener — Docker Compose
+#
+# Usage:
+#   docker-compose up -d          # start Postgres + Redis in the background
+#   docker-compose up             # also starts the API (with live-reload)
+#   docker-compose down -v        # stop + remove volumes
+# ─────────────────────────────────────────────────────────────────────────────
+
+services:
+  # ── PostgreSQL ───────────────────────────────────────────────────────────────
+  postgres:
+    image: postgres:15-alpine
+    container_name: urlshortener_postgres
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: password
+      POSTGRES_DB: url_shortener
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  # ── Redis ─────────────────────────────────────────────────────────────────────
+  redis:
+    image: redis:7-alpine
+    container_name: urlshortener_redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    command: redis-server --save 60 1 --loglevel warning
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+
+  # ── API (optional — comment out to run locally with uvicorn) ─────────────────
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: urlshortener_api
+    environment:
+      APP_ENV: development
+      DATABASE_URL: postgresql://postgres:password@postgres:5432/url_shortener
+      REDIS_URL: redis://redis:6379/0
+      BASE_URL: http://localhost:8000
+      SHORT_CODE_MIN_LENGTH: "4"
+      RATE_LIMIT_REQUESTS: "100"
+      RATE_LIMIT_WINDOW_SECONDS: "60"
+      CACHE_TTL_SECONDS: "3600"
+    ports:
+      - "8000:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    # Run migrations then start the server
+    command: >
+      sh -c "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload"
+    volumes:
+      - .:/app  # mount source for --reload to pick up changes
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+  redis_data:
